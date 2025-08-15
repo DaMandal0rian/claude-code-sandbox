@@ -5,6 +5,9 @@ A secure, production-ready development container setup for Claude Code using Pod
 ## 🚀 Quick Start
 
 ```bash
+# Set your Anthropic API key
+export ANTHROPIC_API_KEY="sk-ant-..."
+
 # Clone or download the setup script
 curl -O https://raw.githubusercontent.com/DaMandal0rian/claude-code-sandbox/refs/heads/main/setup-devcontainer.sh
 chmod +x setup-devcontainer.sh
@@ -14,6 +17,70 @@ chmod +x setup-devcontainer.sh
 
 # Enter the container
 ./setup-devcontainer.sh enter
+
+# Verify Claude Code is working
+claude --version
+```
+
+## 🔑 Authentication
+
+Claude Code requires authentication to work. When running in a container, you cannot use browser-based authentication, so you must use an API key.
+
+### Getting an API Key
+
+1. Go to [Anthropic Console](https://console.anthropic.com/settings/keys)
+2. Create a new API key
+3. Copy the key (it starts with `sk-ant-`)
+
+### Using the API Key
+
+**Method 1: Environment Variable (Recommended)**
+
+```bash
+# Set before running the container
+export ANTHROPIC_API_KEY="sk-ant-your-key-here"
+./setup-devcontainer.sh run
+```
+
+**Method 2: Inside the Container**
+
+```bash
+# Enter the container first
+./setup-devcontainer.sh enter
+
+# Then set the API key
+export ANTHROPIC_API_KEY="sk-ant-your-key-here"
+
+# Test it works
+claude "Hello, can you hear me?"
+```
+
+**Method 3: Add to Shell Configuration**
+
+```bash
+# Inside the container, add to ~/.zshrc
+echo 'export ANTHROPIC_API_KEY="sk-ant-your-key-here"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+### Security Best Practices for API Keys
+
+- **Never commit API keys** to version control
+- **Use environment variables** instead of hardcoding
+- **Rotate keys regularly** for production use
+- **Use separate keys** for different projects
+- **Store securely** using a password manager or secrets tool
+
+For production environments, consider using:
+
+```bash
+# Using a secrets file (not in git)
+source ~/.claude-secrets
+./setup-devcontainer.sh run
+
+# Using a password manager
+export ANTHROPIC_API_KEY=$(pass show anthropic/api-key)
+./setup-devcontainer.sh run
 ```
 
 ## 📋 Prerequisites
@@ -21,6 +88,7 @@ chmod +x setup-devcontainer.sh
 - **Podman** 3.0 or higher
 - **Git**
 - **Linux/macOS** (Windows users can use WSL2)
+- **Anthropic API Key** (get one at <https://console.anthropic.com>)
 - At least 4GB of available RAM
 - 10GB of free disk space
 
@@ -32,7 +100,8 @@ Both container versions are based on the official Claude Code reference implemen
 - **User**: Non-root `node` user with limited sudo
 - **Shell**: ZSH with Oh My Zsh
 - **Languages**: Node.js
-- **Claude Code**: Installed via devcontainers and npm (`npm install -g @anthropic-ai/claude`)
+- **Claude Code**: Installed via npm (`@anthropic-ai/claude-code`)
+- **Authentication**: API key-based (no browser required)
 
 ## 📦 Available Versions
 
@@ -40,10 +109,11 @@ Both container versions are based on the official Claude Code reference implemen
 
 The standard version provides a fully-featured development environment with:
 
-- **Developer Tools**: Git, fzf, jq, git-delta
+- **Developer Tools**: Git, fzf, jq, git-delta, capsh
 - **Network Security**: Basic firewall with configurable rules
 - **VS Code Integration**: Pre-configured extensions and settings
 - **Persistent Storage**: Command history and home directory
+- **API Key Support**: Automatic environment variable passing
 
 **Use this version for:**
 
@@ -136,13 +206,48 @@ fw-status
 ### Environment Variables
 
 ```bash
-# Timezone
+# Required for Claude Code
+export ANTHROPIC_API_KEY="sk-ant-your-key-here"
+
+# Optional configurations
 export TZ="America/New_York"
+export CLAUDE_TELEMETRY_OPTOUT=1  # Disable telemetry
 
 # For hardened version
 export ENABLE_STRICT_MODE=true
 export ENABLE_SECCOMP=true
 export ENABLE_APPARMOR=false
+```
+
+### Docker Compose Alternative
+
+Create a `docker-compose.yml` for easier management:
+
+```yaml
+version: '3.8'
+services:
+  claude-code:
+    image: claude-code-dev:latest
+    container_name: claude-code-devcontainer
+    hostname: claude-code-devcontainer
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CLAUDE_TELEMETRY_OPTOUT=1
+      - TZ=${TZ:-UTC}
+    volumes:
+      - .:/workspace:Z
+      - commandhistory:/commandhistory
+      - home-node:/home/node
+    working_dir: /workspace
+    user: node
+    command: sleep infinity
+
+volumes:
+  commandhistory:
+  home-node:
 ```
 
 ### Customizing Allowed Domains (Hardened Version)
@@ -175,9 +280,10 @@ readonly MAX_PIDS="512"       # Maximum process IDs
 |---------|----------|----------|
 | Non-root user | ✅ | ✅ |
 | Basic firewall | ✅ | ✅ |
+| API key authentication | ✅ | ✅ |
 | Capability dropping | Partial | ALL dropped |
 | Read-only root filesystem | ❌ | ✅ |
-| Domain allowlisting | ❌ | ✅ |
+| Domain allowlisting | ✅ | ✅ |
 | Resource limits | Basic | Strict |
 | Security monitoring | ❌ | ✅ |
 | Seccomp filtering | ❌ | Optional |
@@ -185,6 +291,20 @@ readonly MAX_PIDS="512"       # Maximum process IDs
 | Audit logging | ❌ | ✅ |
 
 ## 🚨 Troubleshooting
+
+### Claude Code Authentication Issues
+
+```bash
+# Check if API key is set
+echo $ANTHROPIC_API_KEY
+
+# Test Claude directly
+claude --version
+claude doctor
+
+# If "unauthorized" error, verify your API key
+# Make sure it starts with "sk-ant-"
+```
 
 ### Container won't start
 
@@ -199,12 +319,18 @@ podman logs claude-code-devcontainer
 podman ps -a
 ```
 
-### Firewall issues (Hardened Version)
+### Firewall issues
 
 ```bash
+# Check if capsh is available
+which capsh
+
+# View firewall logs
+podman exec claude-code-devcontainer sudo iptables -L -v
+
 # Some environments don't support NET_ADMIN
 # Run without strict firewall:
-ENABLE_STRICT_MODE=false ./setup-hardened-devcontainer.sh run
+podman run --cap-drop=NET_ADMIN ...
 ```
 
 ### Permission denied errors
@@ -215,16 +341,21 @@ ENABLE_STRICT_MODE=false ./setup-hardened-devcontainer.sh run
 
 # Check SELinux status
 sestatus
+
+# If issues persist, try :z instead of :Z
 ```
 
 ### Network connectivity issues
 
 ```bash
-# For hardened version, add required domains to ALLOWED_DOMAINS
-# Edit .devcontainer/init-security.sh
-
-# Test connectivity inside container
+# Test API connectivity inside container
 curl -I https://api.anthropic.com
+
+# Check allowed domains
+podman exec claude-code-devcontainer sudo ipset list allowed-domains
+
+# For debugging, temporarily allow all traffic
+podman exec claude-code-devcontainer sudo iptables -P OUTPUT ACCEPT
 ```
 
 ## 📚 VS Code Integration
@@ -241,26 +372,31 @@ The devcontainer.json is configured for VS Code with:
 
 - Format on save
 - ZSH as default terminal
+- API key passed automatically
 
 To use with VS Code:
 
 1. Install the "Remote - Containers" extension
-2. Open your project folder
-3. Click "Reopen in Container" when prompted
+2. Set your API key: `export ANTHROPIC_API_KEY="sk-ant-..."`
+3. Open your project folder
+4. Click "Reopen in Container" when prompted
 
 ## 🧪 Development Workflow
 
 ### Standard Version
 
 ```bash
-# 1. Setup and enter container
+# 1. Set API key
+export ANTHROPIC_API_KEY="sk-ant-your-key-here"
+
+# 2. Setup and enter container
 ./setup-devcontainer.sh
 ./setup-devcontainer.sh enter
 
-# 2. Start coding with Claude
+# 3. Start coding with Claude
 claude "help me create a REST API with Express"
 
-# 3. Use git normally
+# 4. Use git normally
 git add .
 git commit -m "Add API endpoints"
 git push
@@ -269,25 +405,38 @@ git push
 ### Hardened Version
 
 ```bash
-# 1. Setup with security
+# 1. Set API key securely
+export ANTHROPIC_API_KEY=$(pass show anthropic/api-key)
+
+# 2. Setup with security
 ./setup-hardened-devcontainer.sh
 
-# 2. Run security audit
+# 3. Run security audit
 ./setup-hardened-devcontainer.sh audit
 
-# 3. Enter and verify security
+# 4. Enter and verify security
 ./setup-hardened-devcontainer.sh enter
 security-report
 
-# 4. Development with monitoring
+# 5. Development with monitoring
 claude "create a secure authentication system"
 
-# 5. Run security scans
+# 6. Run security scans
 security-scan
 pip-audit
 ```
 
 ## 🔄 Maintenance
+
+### Updating Claude Code
+
+```bash
+# Inside the container
+npm update -g @anthropic-ai/claude-code
+
+# Or rebuild the container
+./setup-devcontainer.sh rebuild
+```
 
 ### Updating the Container
 
@@ -308,6 +457,9 @@ podman volume rm commandhistory home-node
 
 # Remove image
 podman rmi claude-code-dev:latest
+
+# Clean up API key
+unset ANTHROPIC_API_KEY
 ```
 
 ### Backup and Restore
@@ -316,7 +468,7 @@ podman rmi claude-code-dev:latest
 # Backup workspace
 tar -czf workspace-backup.tar.gz /path/to/workspace
 
-# Backup volumes
+# Backup volumes (includes Claude settings)
 podman volume export commandhistory > commandhistory.tar
 podman volume export home-node > home-node.tar
 
@@ -329,8 +481,8 @@ podman volume import home-node < home-node.tar
 
 1. **Allocate sufficient resources**: Increase CPU/memory limits for better performance
 2. **Use local storage**: Avoid network-mounted workspaces
-3. **Limit background processes**: Disable unnecessary monitoring in standard version
-4. **Cache dependencies**: Use volume mounts for package caches
+3. **Cache dependencies**: Use volume mounts for package caches
+4. **Persistent API key**: Add to shell config to avoid re-entering
 
 ## 🤝 Contributing
 
@@ -347,7 +499,8 @@ This project is based on the official Claude Code devcontainer reference impleme
 
 ## 🔗 Resources
 
-- [Claude Code Documentation](https://docs.anthropic.com/en/docs/claude-code/overview)
+- [Claude Code Documentation](https://docs.anthropic.com/en/docs/claude-code)
+- [Anthropic API Keys](https://console.anthropic.com/settings/keys)
 - [Podman Documentation](https://docs.podman.io/)
 - [Devcontainers Specification](https://containers.dev/)
 - [VS Code Remote Containers](https://code.visualstudio.com/docs/remote/containers)
@@ -356,11 +509,13 @@ This project is based on the official Claude Code devcontainer reference impleme
 
 While the hardened version implements multiple security layers, no system is completely secure. Always:
 
+- **Protect your API keys** - never commit them to version control
 - Keep the container and tools updated
 - Review security logs regularly
 - Follow security best practices
 - Never disable security features in production
 - Audit third-party dependencies
+- Rotate API keys periodically
 
 For sensitive projects, consider additional security measures such as:
 
@@ -369,7 +524,8 @@ For sensitive projects, consider additional security measures such as:
 - Access logging
 - Regular security audits
 - Compliance scanning
+- API key rotation policies
 
 ---
 
-**Note**: This is an unofficial implementation adapted for Podman. For the official Claude Code setup, refer to the [Anthropic documentation](https://docs.anthropic.com/en/docs/claude-code/devcontainer).
+**Note**: This is an unofficial implementation adapted for Podman. For the official Claude Code setup, refer to the [Anthropic documentation](https://docs.anthropic.com/en/docs/claude-code).
