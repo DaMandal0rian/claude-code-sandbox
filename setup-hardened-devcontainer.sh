@@ -25,7 +25,6 @@ ENABLE_SECCOMP="${ENABLE_SECCOMP:-true}"
 ENABLE_APPARMOR="${ENABLE_APPARMOR:-false}"  # Disabled by default, enable if available
 ENABLE_NNP="${ENABLE_NNP:-true}"   # controls --security-opt=no-new-privileges
 
-
 # Security settings
 readonly MAX_MEMORY="4g"
 readonly MAX_CPU="2"
@@ -45,7 +44,7 @@ check_podman() {
         print_message $RED "Error: Podman is not installed. Please install podman first."
         exit 1
     fi
-    print_message $GREEN "✓ Podman is installed ($(podman --version))"
+    print_message $GREEN "✓ Podman is installed"
 }
 
 # Function to create security policies
@@ -265,7 +264,7 @@ create_devcontainer_structure() {
   "build": {
     "dockerfile": "Dockerfile",
     "args": {
-      "TZ": "${localEnv:TZ:UTC}",        // use your TZ, falls back if unset
+      "TZ": "${localEnv:TZ:UTC}",
       "CLAUDE_CODE_VERSION": "latest",
       "GIT_DELTA_VERSION": "0.18.2",
       "ZSH_IN_DOCKER_VERSION": "1.2.0"
@@ -273,7 +272,8 @@ create_devcontainer_structure() {
   },
   "runArgs": [
     "--cap-drop=ALL",
-    "--cap-add=NET_RAW",           // needed for ping; drop if not required
+    "--cap-add=NET_ADMIN",
+    "--cap-add=NET_RAW",
     "--cap-add=CHOWN",
     "--cap-add=DAC_OVERRIDE",
     "--cap-add=FOWNER",
@@ -283,11 +283,10 @@ create_devcontainer_structure() {
     "--cap-add=SETUID",
     "--cap-add=SETPCAP",
     "--cap-add=SYS_CHROOT",
-    "--security-opt","no-new-privileges:true",
+    "--security-opt=no-new-privileges:true",
     "--read-only",
     "--tmpfs=/tmp:rw,noexec,nosuid,size=2g",
     "--tmpfs=/var/tmp:rw,noexec,nosuid,size=1g"
-    // removed: tmpfs on /home/node/.cache to avoid mount-on-mount collisions
   ],
   "customizations": {
     "vscode": {
@@ -303,7 +302,7 @@ create_devcontainer_structure() {
         "terminal.integrated.defaultProfile.linux": "zsh",
         "terminal.integrated.profiles.linux": {
           "bash": { "path": "bash", "icon": "terminal-bash" },
-          "zsh":  { "path": "zsh" }
+          "zsh": { "path": "zsh" }
         }
       }
     }
@@ -313,7 +312,7 @@ create_devcontainer_structure() {
     "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
   },
   "containerEnv": {
-    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",  // set on host: export ANTHROPIC_API_KEY=sk-ant-...
+    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
     "CLAUDE_TELEMETRY_OPTOUT": "1",
     "XDG_CONFIG_HOME": "/home/node/.config",
     "XDG_CACHE_HOME": "/tmp/xdg-cache"
@@ -332,7 +331,6 @@ EOF
 
 # Create hardened Dockerfile
 cat > "${DEVCONTAINER_DIR}/Dockerfile" << 'EOF'
-
 FROM node:20-bookworm-slim
 
 # Security: Run package updates first
@@ -353,18 +351,24 @@ RUN apt-get update && apt-get upgrade -y && \
     gnupg \
     lsb-release \
     libseccomp2 \
+    libcap2-bin \
     procps \
     iproute2 \
+    python3 \
+    python3-pip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Try to install aggregate tool, but don't fail if it doesn't work
+RUN pip3 install --break-system-packages aggregate6 2>/dev/null || \
+    echo "Note: aggregate6 installation failed, will use fallback"
 
 # Security: Create non-root user with limited sudo
 ARG USERNAME=node
 RUN groupadd -r $USERNAME || true && \
     usermod -aG sudo $USERNAME && \
-    echo "$USERNAME ALL=(root) NOPASSWD: /usr/sbin/iptables, /usr/sbin/ip6tables, /usr/sbin/ipset" > /etc/sudoers.d/$USERNAME && \
+    echo "$USERNAME ALL=(root) NOPASSWD: /usr/sbin/iptables, /usr/sbin/ip6tables, /usr/sbin/ipset, /usr/sbin/iptables-save" > /etc/sudoers.d/$USERNAME && \
     chmod 0440 /etc/sudoers.d/$USERNAME && \
-    # Validate sudoers file
     visudo -c -f /etc/sudoers.d/$USERNAME
 
 # Security: Set up restricted shell environment
@@ -417,7 +421,7 @@ USER $USERNAME
 ENV NPM_CONFIG_PREFIX=/home/$USERNAME/.npm-global
 ENV PATH=/home/$USERNAME/.npm-global/bin:$PATH
 
-# Install Oh My Zsh as root (avoid 'sudo' during build)
+# Install Oh My Zsh as root
 USER root
 ARG ZSH_IN_DOCKER_VERSION=1.2.0
 RUN export HOME=/home/$USERNAME && \
@@ -431,16 +435,16 @@ RUN export HOME=/home/$USERNAME && \
 USER $USERNAME
 
 # Install Claude Code CLI via npm
-RUN npm install -g @anthropic-ai/claude-code
+RUN mkdir -p /home/$USERNAME/.npm-global && npm install -g @anthropic-ai/claude-code
 
-# Shell history hardening (keep aliases separate)
+# Shell history hardening
 RUN echo "export HISTSIZE=10000" >> ~/.zshrc && \
     echo "export SAVEHIST=10000" >> ~/.zshrc && \
     echo "export HISTTIMEFORMAT='%F %T '" >> ~/.zshrc && \
     echo "setopt HIST_IGNORE_SPACE" >> ~/.zshrc && \
     echo "setopt HIST_EXPIRE_DUPS_FIRST" >> ~/.zshrc
 
-# === Alias persistence: separate file + source from both .zshrc and .zshenv ===
+# Alias persistence
 RUN cat > /home/node/.zsh_aliases <<'ALIASES'
 alias check-secrets='git secrets --scan 2>/dev/null || echo "git-secrets not installed"'
 alias fw-status='sudo iptables -L -n -v'
@@ -463,7 +467,7 @@ RUN echo 'typeset -U path PATH; path=(/home/node/.npm-global/bin $path); export 
 # Make zsh the default shell for processes
 ENV SHELL=/usr/bin/zsh
 
-# --- Save a skeleton of /home/node for seeding mounted volume on first run ---
+# Save a skeleton of /home/node for seeding mounted volume on first run
 USER root
 RUN mkdir -p /opt/container-skel/home && \
     cp -a /home/$USERNAME/. /opt/container-skel/home/
@@ -472,10 +476,11 @@ USER $USERNAME
 CMD ["/usr/bin/zsh", "-l"]
 EOF
 
-    # Create enhanced security initialization script
+    # Create enhanced security initialization script (with Anthropic-aligned firewall)
     cat > "${DEVCONTAINER_DIR}/init-security.sh" << 'EOF'
 #!/bin/bash
 set -euo pipefail
+IFS=$'\n\t'
 
 # Security initialization script for Claude Code devcontainer
 echo "Initializing security measures..."
@@ -492,6 +497,11 @@ log_security() {
 }
 
 # Check for required capabilities
+if ! command -v capsh &> /dev/null; then
+    log_security "Error: capsh not found. Installing libcap2-bin might be required."
+    exit 1
+fi
+
 if ! capsh --print | grep -q cap_net_admin; then
     log_security "Warning: NET_ADMIN capability not available, firewall setup will be limited"
 fi
@@ -500,46 +510,118 @@ fi
 mkdir -p /tmp/security-audit
 chmod 700 /tmp/security-audit
 
-# 1. Set up strict firewall rules
+# 1. Set up strict firewall rules (Anthropic-aligned approach)
 log_security "Configuring firewall rules..."
 
-# Clear existing rules
-sudo iptables -F INPUT 2>/dev/null || true
-sudo iptables -F OUTPUT 2>/dev/null || true
-sudo iptables -F FORWARD 2>/dev/null || true
-sudo ip6tables -F INPUT 2>/dev/null || true
-sudo ip6tables -F OUTPUT 2>/dev/null || true
-sudo ip6tables -F FORWARD 2>/dev/null || true
+# Extract container DNS info BEFORE any flushing
+CONTAINER_DNS_RULES=$(sudo iptables-save -t nat 2>/dev/null | grep -E "(127\.0\.0\.11|10\.88\.0\.1)" || true)
 
-# Set default policies
-sudo iptables -P INPUT DROP
-sudo iptables -P FORWARD DROP
-sudo iptables -P OUTPUT DROP
-sudo ip6tables -P INPUT DROP
-sudo ip6tables -P FORWARD DROP
-sudo ip6tables -P OUTPUT DROP
+# Clear existing rules and ipsets
+sudo iptables -F 2>/dev/null || true
+sudo iptables -X 2>/dev/null || true
+sudo iptables -t nat -F 2>/dev/null || true
+sudo iptables -t nat -X 2>/dev/null || true
+sudo iptables -t mangle -F 2>/dev/null || true
+sudo iptables -t mangle -X 2>/dev/null || true
+sudo ip6tables -F 2>/dev/null || true
+sudo ip6tables -X 2>/dev/null || true
+sudo ipset destroy allowed-domains 2>/dev/null || true
+sudo ipset destroy allowed-domains6 2>/dev/null || true
 
-# Allow loopback
+# Selectively restore ONLY internal container DNS resolution
+if [ -n "$CONTAINER_DNS_RULES" ]; then
+    log_security "Restoring container DNS rules..."
+    sudo iptables -t nat -N DOCKER_OUTPUT 2>/dev/null || true
+    sudo iptables -t nat -N DOCKER_POSTROUTING 2>/dev/null || true
+    echo "$CONTAINER_DNS_RULES" | while IFS= read -r rule; do
+        if [[ $rule == -A* ]]; then
+            sudo iptables -t nat $rule 2>/dev/null || true
+        fi
+    done
+else
+    log_security "No container DNS rules to restore"
+fi
+
+# First allow DNS and localhost before any restrictions
+# Allow outbound DNS
+sudo iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+sudo iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+sudo ip6tables -A OUTPUT -p udp --dport 53 -j ACCEPT
+sudo ip6tables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+
+# Allow inbound DNS responses
+sudo iptables -A INPUT -p udp --sport 53 -j ACCEPT
+sudo iptables -A INPUT -p tcp --sport 53 -m state --state ESTABLISHED -j ACCEPT
+sudo ip6tables -A INPUT -p udp --sport 53 -j ACCEPT
+sudo ip6tables -A INPUT -p tcp --sport 53 -m state --state ESTABLISHED -j ACCEPT
+
+# Allow outbound SSH
+sudo iptables -A OUTPUT -p tcp --dport 22 -j ACCEPT
+sudo ip6tables -A OUTPUT -p tcp --dport 22 -j ACCEPT
+
+# Allow inbound SSH responses
+sudo iptables -A INPUT -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
+sudo ip6tables -A INPUT -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
+
+# Allow localhost
 sudo iptables -A INPUT -i lo -j ACCEPT
 sudo iptables -A OUTPUT -o lo -j ACCEPT
 sudo ip6tables -A INPUT -i lo -j ACCEPT
 sudo ip6tables -A OUTPUT -o lo -j ACCEPT
 
-# Allow established connections
-sudo iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-sudo iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-sudo ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-sudo ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+# Create ipset with CIDR support
+sudo ipset create allowed-domains hash:net family inet
+sudo ipset create allowed-domains6 hash:net family inet6
 
-# Create ipset for allowed domains
-sudo ipset create allowed-domains hash:net family inet 2>/dev/null || true
-sudo ipset create allowed-domains6 hash:net family inet6 2>/dev/null || true
+# Check if aggregate is available
+AGGREGATE_CMD=""
+if command -v aggregate &> /dev/null; then
+    AGGREGATE_CMD="aggregate -q"
+elif command -v aggregate6 &> /dev/null; then
+    AGGREGATE_CMD="aggregate6 -q"
+fi
 
-# Define allowed domains
+# Fetch GitHub meta information and aggregate + add their IP ranges
+log_security "Fetching GitHub IP ranges..."
+gh_ranges=$(curl -s --connect-timeout 10 https://api.github.com/meta || echo "")
+if [ -z "$gh_ranges" ]; then
+    log_security "Warning: Failed to fetch GitHub IP ranges, using fallback"
+    # Add some known GitHub ranges as fallback
+    sudo ipset add allowed-domains "140.82.112.0/20" 2>/dev/null || true
+    sudo ipset add allowed-domains "192.30.252.0/22" 2>/dev/null || true
+    sudo ipset add allowed-domains "185.199.108.0/22" 2>/dev/null || true
+else
+    if echo "$gh_ranges" | jq -e '.web and .api and .git' >/dev/null 2>&1; then
+        log_security "Processing GitHub IPs..."
+        # Use aggregate if available, otherwise add individually
+        if [ -n "$AGGREGATE_CMD" ]; then
+            while read -r cidr; do
+                if [[ "$cidr" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
+                    log_security "Adding GitHub range $cidr"
+                    sudo ipset add allowed-domains "$cidr" 2>/dev/null || true
+                fi
+            done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | $AGGREGATE_CMD)
+        else
+            # Fallback without aggregate - just add all ranges
+            log_security "Adding GitHub IPs without aggregation..."
+            echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | sort -u | while read -r cidr; do
+                if [[ "$cidr" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
+                    sudo ipset add allowed-domains "$cidr" 2>/dev/null || true
+                fi
+            done
+        fi
+    else
+        log_security "Warning: GitHub API response format unexpected"
+    fi
+fi
+
+# Define comprehensive allowed domains for hardened environment
 ALLOWED_DOMAINS=(
     # Package registries
     "registry.npmjs.org"
     "registry.yarnpkg.com"
+    "pypi.org"
+    "files.pythonhosted.org"
 
     # Version control
     "github.com"
@@ -548,34 +630,54 @@ ALLOWED_DOMAINS=(
     "gitlab.com"
     "bitbucket.org"
 
-    # Claude/Anthropic
+    # Claude/Anthropic (required)
     "api.anthropic.com"
     "claude.ai"
+    "sentry.io"
+    "statsig.anthropic.com"
+    "statsig.com"
 
     # Container registries
     "ghcr.io"
     "docker.io"
     "registry-1.docker.io"
+    "registry.docker.io"
 
     # Development tools
     "deb.debian.org"
     "security.debian.org"
     "archive.ubuntu.com"
     "security.ubuntu.com"
+    "packages.microsoft.com"
+
+    # Security tools
+    "cve.mitre.org"
+    "nvd.nist.gov"
 )
 
 # Resolve and add IPs to ipset
 for domain in "${ALLOWED_DOMAINS[@]}"; do
+    log_security "Resolving $domain..."
+
     # IPv4
-    ips=$(dig +short A "$domain" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || true)
+    ips=$(dig +short A "$domain" @8.8.8.8 2>/dev/null | grep -E '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' || true)
+    if [ -z "$ips" ]; then
+        # Try system resolver as fallback
+        ips=$(dig +short A "$domain" 2>/dev/null | grep -E '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' || true)
+    fi
+
     if [ -n "$ips" ]; then
         while IFS= read -r ip; do
-            sudo ipset add allowed-domains "$ip" 2>/dev/null || true
+            if [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+                sudo ipset add allowed-domains "$ip" 2>/dev/null || true
+            fi
         done <<< "$ips"
+    else
+        log_security "Warning: Failed to resolve $domain"
     fi
 
     # IPv6
-    ips6=$(dig +short AAAA "$domain" 2>/dev/null | grep ':' || true)
+    ips6=$(dig +short AAAA "$domain" @2001:4860:4860::8888 2>/dev/null | grep ':' || true)
     if [ -n "$ips6" ]; then
         while IFS= read -r ip; do
             sudo ipset add allowed-domains6 "$ip" 2>/dev/null || true
@@ -583,39 +685,71 @@ for domain in "${ALLOWED_DOMAINS[@]}"; do
     fi
 done
 
-# Allow DNS
-sudo iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
-sudo iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
-sudo ip6tables -A OUTPUT -p udp --dport 53 -j ACCEPT
-sudo ip6tables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+# Get host IP from default route
+HOST_IP=$(ip route | grep default | awk '{print $3}' | head -n1)
+if [ -z "$HOST_IP" ]; then
+    log_security "Warning: Failed to detect host IP, trying alternative method..."
+    HOST_IP=$(ip route | grep -E '^default' | cut -d' ' -f3)
+fi
 
-# Allow HTTPS to allowed domains only
+if [ -n "$HOST_IP" ]; then
+    HOST_NETWORK=$(echo "$HOST_IP" | sed "s/\.[0-9]*$/.0\/24/")
+    log_security "Host network detected as: $HOST_NETWORK"
+    sudo iptables -A INPUT -s "$HOST_NETWORK" -j ACCEPT
+    sudo iptables -A OUTPUT -d "$HOST_NETWORK" -j ACCEPT
+    sudo ip6tables -A INPUT -s fe80::/10 -j ACCEPT  # Link-local IPv6
+    sudo ip6tables -A OUTPUT -d fe80::/10 -j ACCEPT
+else
+    log_security "Warning: Could not detect host network"
+fi
+
+# Set default policies to DROP (hardened)
+sudo iptables -P INPUT DROP
+sudo iptables -P FORWARD DROP
+sudo iptables -P OUTPUT DROP
+sudo ip6tables -P INPUT DROP
+sudo ip6tables -P FORWARD DROP
+sudo ip6tables -P OUTPUT DROP
+
+# Allow established connections for already approved traffic
+sudo iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+sudo ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+sudo ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+# Allow HTTPS for package managers and git (to allowed domains only)
 sudo iptables -A OUTPUT -p tcp --dport 443 -m set --match-set allowed-domains dst -j ACCEPT
 sudo ip6tables -A OUTPUT -p tcp --dport 443 -m set --match-set allowed-domains6 dst -j ACCEPT
 
-# Allow HTTP to allowed domains only (for package managers)
+# Allow HTTP for package managers (to allowed domains only)
 sudo iptables -A OUTPUT -p tcp --dport 80 -m set --match-set allowed-domains dst -j ACCEPT
 sudo ip6tables -A OUTPUT -p tcp --dport 80 -m set --match-set allowed-domains6 dst -j ACCEPT
 
-# Allow SSH to allowed domains only
-sudo iptables -A OUTPUT -p tcp --dport 22 -m set --match-set allowed-domains dst -j ACCEPT
-sudo ip6tables -A OUTPUT -p tcp --dport 22 -m set --match-set allowed-domains6 dst -j ACCEPT
-
-# Allow git protocol
+# Allow git protocol (to allowed domains only)
 sudo iptables -A OUTPUT -p tcp --dport 9418 -m set --match-set allowed-domains dst -j ACCEPT
 sudo ip6tables -A OUTPUT -p tcp --dport 9418 -m set --match-set allowed-domains6 dst -j ACCEPT
 
-# Log dropped packets (rate limited)
+# Log dropped packets (rate limited) - for security monitoring
 sudo iptables -A INPUT -m limit --limit 1/min -j LOG --log-prefix "FW-DROP-IN: " --log-level 4
 sudo iptables -A OUTPUT -m limit --limit 1/min -j LOG --log-prefix "FW-DROP-OUT: " --log-level 4
+sudo ip6tables -A INPUT -m limit --limit 1/min -j LOG --log-prefix "FW6-DROP-IN: " --log-level 4
+sudo ip6tables -A OUTPUT -m limit --limit 1/min -j LOG --log-prefix "FW6-DROP-OUT: " --log-level 4
 
-# Host network access (for VS Code connection)
-HOST_IP=$(ip route | grep default | awk '{print $3}' || echo "")
-if [ -n "$HOST_IP" ]; then
-    HOST_NETWORK=$(echo "$HOST_IP" | sed 's/\.[0-9]*$/.0\/24/')
-    log_security "Allowing host network: $HOST_NETWORK"
-    sudo iptables -A INPUT -s "$HOST_NETWORK" -j ACCEPT
-    sudo iptables -A OUTPUT -d "$HOST_NETWORK" -j ACCEPT
+log_security "Firewall configuration complete"
+
+# Verify firewall rules
+log_security "Verifying firewall configuration..."
+if curl --connect-timeout 5 -s https://example.com >/dev/null 2>&1; then
+    log_security "ERROR: Firewall verification failed - was able to reach https://example.com"
+else
+    log_security "✓ Firewall verification passed - unable to reach https://example.com as expected"
+fi
+
+# Verify GitHub API access
+if curl --connect-timeout 5 -s https://api.github.com/zen >/dev/null 2>&1; then
+    log_security "✓ GitHub API connectivity verified"
+else
+    log_security "WARNING: Unable to reach GitHub API"
 fi
 
 # 2. File system hardening
@@ -634,10 +768,10 @@ log_security "Setting up process monitoring..."
 # Create monitoring script
 cat > /tmp/monitor-processes.sh << 'MONITOR_EOF'
 #!/bin/bash
-# Simple process monitor
+# Enhanced process monitor for hardened environment
 while true; do
     # Check for suspicious processes
-    suspicious=$(ps aux | grep -E "(nc|netcat|nmap|tcpdump|wireshark)" | grep -v grep || true)
+    suspicious=$(ps aux | grep -E "(nc|netcat|nmap|tcpdump|wireshark|masscan|hydra|sqlmap)" | grep -v grep || true)
     if [ -n "$suspicious" ]; then
         echo "[ALERT] $(date '+%Y-%m-%d %H:%M:%S') Suspicious process detected: $suspicious" >> /tmp/security.log
     fi
@@ -646,6 +780,12 @@ while true; do
     high_usage=$(ps aux | awk '$3 > 80.0 || $4 > 80.0 {print}' | grep -v "COMMAND" || true)
     if [ -n "$high_usage" ]; then
         echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') High resource usage detected: $high_usage" >> /tmp/security.log
+    fi
+
+    # Check for unexpected root processes
+    root_procs=$(ps aux | grep "^root" | grep -vE "(kernel|systemd|init)" | wc -l)
+    if [ "$root_procs" -gt 10 ]; then
+        echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') Unusual number of root processes: $root_procs" >> /tmp/security.log
     fi
 
     sleep 60
@@ -658,11 +798,13 @@ nohup /tmp/monitor-processes.sh > /dev/null 2>&1 &
 # 4. Network monitoring
 log_security "Setting up network monitoring..."
 
-# Monitor outbound connections
+# Enhanced network monitor
 cat > /tmp/monitor-network.sh << 'NET_EOF'
 #!/bin/bash
-# Network connection monitor
+# Enhanced network connection monitor
 LOG_FILE="/tmp/network-connections.log"
+ALERT_LOG="/tmp/security.log"
+
 while true; do
     # Log new connections with timestamp
     echo "=== $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
@@ -670,10 +812,24 @@ while true; do
         ss -tun | grep -v "127.0.0.1" | tail -n +2 >> "$LOG_FILE"
 
     # Check for suspicious ports
-    suspicious_ports=$(ss -tun | grep -E ":(4444|5555|6666|7777|8888|9999)" | grep -v "127.0.0.1" || true)
+    suspicious_ports=$(ss -tun | grep -E ":(4444|5555|6666|7777|8888|9999|31337|12345)" | grep -v "127.0.0.1" || true)
     if [ -n "$suspicious_ports" ]; then
-        echo "[ALERT] $(date '+%Y-%m-%d %H:%M:%S') Suspicious port activity: $suspicious_ports" >> /tmp/security.log
+        echo "[ALERT] $(date '+%Y-%m-%d %H:%M:%S') Suspicious port activity: $suspicious_ports" >> "$ALERT_LOG"
     fi
+
+    # Monitor connection count
+    conn_count=$(ss -tun | grep -v "127.0.0.1" | wc -l)
+    if [ "$conn_count" -gt 50 ]; then
+        echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') High number of connections: $conn_count" >> "$ALERT_LOG"
+    fi
+
+    # Check for connections to non-allowed IPs
+    active_ips=$(ss -tun | grep -v "127.0.0.1" | awk '{print $6}' | cut -d: -f1 | sort -u | grep -E '^[0-9]{1,3}\.[0-9]{1,3}' || true)
+    for ip in $active_ips; do
+        if ! sudo ipset test allowed-domains "$ip" 2>/dev/null; then
+            echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') Connection to non-allowed IP: $ip" >> "$ALERT_LOG"
+        fi
+    done
 
     sleep 30
 done
@@ -689,29 +845,72 @@ log_security "Running security audit..."
 find /workspace -type f -perm -002 2>/dev/null > /tmp/security-audit/world-writable-files.txt || true
 
 # Check for setuid/setgid binaries
-find / -type f \( -perm -4000 -o -perm -2000 \) 2>/dev/null > /tmp/security-audit/suid-binaries.txt || true
+find /usr /bin /sbin -type f \( -perm -4000 -o -perm -2000 \) 2>/dev/null > /tmp/security-audit/suid-binaries.txt || true
 
 # List listening ports
-ss -tlnp 2>/dev/null > /tmp/security-audit/listening-ports.txt || true
+ss -tlnp 2>/dev/null > /tmp/security-audit/listening-ports.txt || ss -tln > /tmp/security-audit/listening-ports.txt
+
+# Check installed packages for security updates
+if command -v apt-get &> /dev/null; then
+    apt list --upgradable 2>/dev/null | grep -i security > /tmp/security-audit/security-updates.txt || true
+fi
 
 # Show final firewall rules
 log_security "Final firewall configuration:"
 sudo iptables -L -n -v | tee /tmp/security-audit/firewall-rules.txt
+echo "=== IPv6 Rules ===" >> /tmp/security-audit/firewall-rules.txt
+sudo ip6tables -L -n -v >> /tmp/security-audit/firewall-rules.txt
+
+# Show ipset contents summary
+echo "=== Allowed Domains IP Count ===" >> /tmp/security-audit/firewall-rules.txt
+sudo ipset list allowed-domains | grep -c "^[0-9]" | xargs echo "IPv4 entries:" >> /tmp/security-audit/firewall-rules.txt
+sudo ipset list allowed-domains6 | grep -c "^[0-9]" | xargs echo "IPv6 entries:" >> /tmp/security-audit/firewall-rules.txt
 
 log_security "Security initialization complete"
 
-# Create security report
+# Create enhanced security report
 cat > /tmp/security-report.txt << REPORT_EOF
 === Security Configuration Report ===
 Date: $(date)
 Container: $(hostname)
+User: $(whoami)
 
-Firewall: Configured with strict egress filtering
-Monitoring: Process and network monitoring active
-Filesystem: Restrictive permissions applied
-Audit logs: Available in /tmp/security-audit/
+FIREWALL STATUS:
+- Policy: DROP all except allowed domains
+- Allowed domains: ${#ALLOWED_DOMAINS[@]} configured
+- IPv4 IPs allowed: $(sudo ipset list allowed-domains 2>/dev/null | grep -c "^[0-9]" || echo "0")
+- IPv6 IPs allowed: $(sudo ipset list allowed-domains6 2>/dev/null | grep -c "^[0-9]" || echo "0")
 
-Review security logs: cat /tmp/security.log
+MONITORING:
+- Process monitoring: Active (PID: $(pgrep -f monitor-processes.sh || echo "N/A"))
+- Network monitoring: Active (PID: $(pgrep -f monitor-network.sh || echo "N/A"))
+- Security log: /tmp/security.log
+
+FILESYSTEM:
+- Root filesystem: $(mount | grep " / " | grep -q "ro" && echo "Read-only" || echo "Read-write (WARNING)")
+- Temporary directories: Mounted with noexec
+- World-writable files: $(wc -l < /tmp/security-audit/world-writable-files.txt 2>/dev/null || echo "0")
+
+CAPABILITIES:
+$(capsh --print 2>/dev/null | grep "Current:" || echo "Unable to determine")
+
+AUDIT FILES:
+- Firewall rules: /tmp/security-audit/firewall-rules.txt
+- SUID binaries: /tmp/security-audit/suid-binaries.txt
+- Listening ports: /tmp/security-audit/listening-ports.txt
+- Security updates: /tmp/security-audit/security-updates.txt
+
+SECURITY COMMANDS:
+- check-firewall: View current firewall rules
+- monitor-connections: Live network monitoring
+- monitor-logs: View security alerts
+- security-report: View this report
+
+RECOMMENDATIONS:
+1. Review security logs regularly: cat /tmp/security.log
+2. Check for security updates: apt list --upgradable 2>/dev/null | grep -i security
+3. Monitor network connections for anomalies
+4. Verify all processes are expected: check-processes
 REPORT_EOF
 
 cat /tmp/security-report.txt
@@ -723,6 +922,19 @@ EOF
 set -euo pipefail
 
 echo "Running post-create setup..."
+
+# Check if API key is set
+if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+    echo ""
+    echo "⚠️  WARNING: ANTHROPIC_API_KEY not set!"
+    echo "Claude Code requires an API key for authentication in containers."
+    echo ""
+    echo "To set it:"
+    echo "  export ANTHROPIC_API_KEY='sk-ant-your-key-here'"
+    echo ""
+    echo "Get your API key at: https://console.anthropic.com/settings/keys"
+    echo ""
+fi
 
 # Create development directories
 mkdir -p ~/projects ~/scripts ~/configs
@@ -763,7 +975,7 @@ build_container() {
     # Build with security options
     podman build \
         --tag "${IMAGE_NAME}:latest" \
-        --build-arg TZ="${TZ:-America/Los_Angeles}" \
+        --build-arg TZ="${TZ:-UTC}" \
         --build-arg CLAUDE_CODE_VERSION="latest" \
         --build-arg GIT_DELTA_VERSION="0.18.2" \
         --build-arg ZSH_IN_DOCKER_VERSION="1.2.0" \
@@ -782,6 +994,15 @@ build_container() {
 run_container() {
     print_message $YELLOW "Starting hardened container..."
 
+    # Check if API key is set
+    if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+        print_message $YELLOW ""
+        print_message $YELLOW "⚠️  WARNING: ANTHROPIC_API_KEY not set!"
+        print_message $YELLOW "You'll need to set it inside the container or pass it with:"
+        print_message $YELLOW "  export ANTHROPIC_API_KEY='sk-ant-...'"
+        print_message $YELLOW ""
+    fi
+
     # Stop existing container if running
     podman stop "${CONTAINER_NAME}" 2>/dev/null || true
     podman rm "${CONTAINER_NAME}" 2>/dev/null || true
@@ -790,7 +1011,7 @@ run_container() {
     podman volume create commandhistory 2>/dev/null || true
     podman volume create home-node 2>/dev/null || true
 
-    # Seed the /home/node volume with defaults (aliases, .zshrc, OMZ) if empty
+    # Seed the /home/node volume with defaults if empty
     print_message $YELLOW "Seeding home volume (non-destructive)..."
     podman run --rm --user root \
         -v "home-node:/home/node:Z" \
@@ -816,7 +1037,6 @@ run_container() {
         --cap-add=SYS_CHROOT
 
         # Security options
-        --security-opt=no-new-privileges
         --security-opt=label=type:container_runtime_t
 
         # Resource limits
@@ -837,9 +1057,9 @@ run_container() {
         --tmpfs=/home/node/.local:rw,noexec,nosuid,size=512m
     )
 
-    # Conditionally enable NNP
+    # Conditionally enable no-new-privileges
     if [[ "${ENABLE_NNP}" == "true" ]]; then
-    SECURITY_OPTS+=( --security-opt=no-new-privileges )
+        SECURITY_OPTS+=( --security-opt=no-new-privileges )
     fi
 
     # Add seccomp profile if enabled
@@ -857,13 +1077,17 @@ run_container() {
         --name "${CONTAINER_NAME}" \
         --hostname "${CONTAINER_NAME}" \
         "${SECURITY_OPTS[@]}" \
+        --env "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
+        --env "CLAUDE_TELEMETRY_OPTOUT=1" \
+        --env "NODE_ENV=development" \
+        --env "PYTHONDONTWRITEBYTECODE=1" \
+        --env "XDG_CONFIG_HOME=/home/node/.config" \
+        --env "XDG_CACHE_HOME=/tmp/xdg-cache" \
         --volume "${WORKSPACE_DIR}:/workspace:Z" \
         --volume "commandhistory:/commandhistory:Z" \
         --volume "home-node:/home/node:Z" \
         --workdir /workspace \
         --user node \
-        --env NODE_ENV=development \
-        --env PYTHONDONTWRITEBYTECODE=1 \
         --ulimit nofile=1024:1024 \
         --ulimit nproc=512:512 \
         "${IMAGE_NAME}:latest" \
@@ -898,6 +1122,15 @@ run_container() {
 enter_container() {
     print_message $YELLOW "Entering hardened container..."
     print_message $YELLOW "Note: Running with restricted privileges and monitored environment"
+
+    # Check if API key is set
+    if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+        print_message $YELLOW ""
+        print_message $YELLOW "Note: ANTHROPIC_API_KEY not set. Set it in the container with:"
+        print_message $YELLOW "  export ANTHROPIC_API_KEY='sk-ant-your-key-here'"
+        print_message $YELLOW ""
+    fi
+
     podman exec -it "${CONTAINER_NAME}" /usr/bin/zsh -l
 }
 
@@ -992,20 +1225,25 @@ Options:
     -N          Disable no-new-privileges (lets sudo elevate)
     -h          Show this help message
 
+Environment Variables:
+    ANTHROPIC_API_KEY   Your Anthropic API key for Claude Code
+
 Security Features:
     - Minimal capability set (drops ALL, adds only required)
     - Read-only root filesystem with tmpfs for writable areas
-    - Strict firewall with domain allowlisting
+    - Strict firewall with domain allowlisting (Anthropic-aligned)
     - Resource limits (CPU, memory, PID)
     - Process and network monitoring
     - Security audit logging
     - No new privileges flag
     - Seccomp filtering (optional)
     - AppArmor support (optional)
-    - No new privileges flag (optional)
 
 Examples:
+    # Set API key and run
+    export ANTHROPIC_API_KEY="sk-ant-..."
     $0              # Full setup with security hardening
+
     $0 setup        # Just create the devcontainer files
     $0 build        # Build the hardened container image
     $0 run          # Run with security restrictions
@@ -1018,6 +1256,13 @@ Examples:
 
     # Disable seccomp for compatibility
     ENABLE_SECCOMP=false $0 run
+
+API Key Authentication:
+    Claude Code requires an API key when running in containers.
+    Get your key at: https://console.anthropic.com/settings/keys
+
+    Set it before running:
+    export ANTHROPIC_API_KEY="sk-ant-..."
 EOF
 }
 
@@ -1025,19 +1270,18 @@ EOF
 COMMAND="${1:-setup}"
 shift || true
 
-# was: while getopts "n:i:w:sSah" opt; do
 while getopts "n:i:w:sSahN" opt; do
-  case $opt in
-    n) CONTAINER_NAME="$OPTARG" ;;
-    i) IMAGE_NAME="$OPTARG" ;;
-    w) WORKSPACE_DIR="$OPTARG" ;;
-    s) ENABLE_STRICT_MODE="true" ;;
-    S) ENABLE_SECCOMP="true" ;;
-    a) ENABLE_APPARMOR="true" ;;
-    N) ENABLE_NNP="false" ;;              # <-- new
-    h) usage; exit 0 ;;
-    \?) echo "Invalid option: -$OPTARG" >&2; usage; exit 1 ;;
-  esac
+    case $opt in
+        n) CONTAINER_NAME="$OPTARG" ;;
+        i) IMAGE_NAME="$OPTARG" ;;
+        w) WORKSPACE_DIR="$OPTARG" ;;
+        s) ENABLE_STRICT_MODE="true" ;;
+        S) ENABLE_SECCOMP="true" ;;
+        a) ENABLE_APPARMOR="true" ;;
+        N) ENABLE_NNP="false" ;;
+        h) usage; exit 0 ;;
+        \?) echo "Invalid option: -$OPTARG" >&2; usage; exit 1 ;;
+    esac
 done
 
 # Main execution
