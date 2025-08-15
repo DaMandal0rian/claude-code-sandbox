@@ -317,8 +317,7 @@ create_devcontainer_structure() {
     }
   },
   "features": {
-    "ghcr.io/devcontainers/features/node:1": {},
-    "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
+    "ghcr.io/devcontainers/features/node:1": {}
   },
   "postStartCommand": "/bin/bash .devcontainer/init-security.sh",
   "remoteUser": "node",
@@ -431,6 +430,9 @@ RUN export HOME=/home/$USERNAME && \
 
 # Switch to user
 USER $USERNAME
+
+# Install Claude Code CLI via npm
+RUN npm install -g @anthropic-ai/claude
 
 # Shell history hardening (keep aliases separate)
 RUN echo "export HISTSIZE=10000" >> ~/.zshrc && \
