@@ -72,13 +72,8 @@ create_devcontainer_structure() {
         },
         "terminal.integrated.defaultProfile.linux": "zsh",
         "terminal.integrated.profiles.linux": {
-          "bash": {
-            "path": "bash",
-            "icon": "terminal-bash"
-          },
-          "zsh": {
-            "path": "zsh"
-          }
+          "bash": { "path": "bash", "icon": "terminal-bash" },
+          "zsh": { "path": "zsh" }
         }
       }
     }
@@ -87,19 +82,27 @@ create_devcontainer_structure() {
     "ghcr.io/devcontainers/features/node:1": {},
     "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
   },
-  "postStartCommand": "/bin/bash .devcontainer/init-firewall.sh",
+  "containerEnv": {
+    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
+    "CLAUDE_TELEMETRY_OPTOUT": "1",
+    "XDG_CONFIG_HOME": "/home/node/.config",
+    "XDG_CACHE_HOME": "/home/node/.cache"
+  },
   "remoteUser": "node",
   "workspaceFolder": "/workspace",
   "mounts": [
     "source=${localWorkspaceFolder},target=/workspace,type=bind",
-    "source=commandhistory,target=/commandhistory,type=volume"
+    "source=commandhistory,target=/commandhistory,type=volume",
+    "source=home-node,target=/home/node,type=volume"
   ],
-  "postCreateCommand": "claude --version"
+  "postCreateCommand": "claude --version && claude doctor || true",
+  "postStartCommand": "/bin/bash .devcontainer/init-firewall.sh"
 }
 EOF
 
-    # Create Dockerfile
-    cat > "${DEVCONTAINER_DIR}/Dockerfile" << 'EOF'
+# Create Dockerfile
+cat > "${DEVCONTAINER_DIR}/Dockerfile" << 'EOF'
+
 FROM node:20-bookworm
 
 # Install basic dependencies
