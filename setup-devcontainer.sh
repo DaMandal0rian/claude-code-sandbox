@@ -79,8 +79,7 @@ create_devcontainer_structure() {
     }
   },
   "features": {
-    "ghcr.io/devcontainers/features/node:1": {},
-    "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
+    "ghcr.io/devcontainers/features/node:1": {}
   },
   "containerEnv": {
     "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
@@ -155,8 +154,8 @@ RUN ARCH=$(dpkg --print-architecture) && \
 USER node
 
 # Install global npm packages directory
-ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
-ENV PATH=$PATH:/usr/local/share/npm-global/bin
+ENV NPM_CONFIG_PREFIX=/home/node/.npm-global
+ENV PATH=$PATH:/home/node/.npm-global/bin
 
 # Install Oh My Zsh
 ARG ZSH_IN_DOCKER_VERSION=1.2.0
@@ -170,8 +169,8 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
 # Set the default shell to zsh
 ENV SHELL=/bin/zsh
 
-# Install Claude Code (will be done via devcontainer features)
-# This is handled by the devcontainer feature in devcontainer.json
+# Install Claude Code CLI via npm
+RUN mkdir -p /home/node/.npm-global && npm install -g @anthropic-ai/claude
 
 CMD ["/bin/zsh"]
 EOF

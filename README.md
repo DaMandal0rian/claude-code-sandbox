@@ -32,7 +32,7 @@ Both container versions are based on the official Claude Code reference implemen
 - **User**: Non-root `node` user with limited sudo
 - **Shell**: ZSH with Oh My Zsh
 - **Languages**: Node.js
-- **Claude Code**: Installed via devcontainer features
+- **Claude Code**: Installed via npm (`npm install -g @anthropic-ai/claude`)
 
 ## 📦 Available Versions
 
