@@ -31,7 +31,7 @@ Both container versions are based on the official Claude Code reference implemen
 - **Base Image**: Node.js 20 on Debian Bookworm
 - **User**: Non-root `node` user with limited sudo
 - **Shell**: ZSH with Oh My Zsh
-- **Languages**: Node.js, Python 3
+- **Languages**: Node.js
 - **Claude Code**: Installed via devcontainer features
 
 ## 📦 Available Versions
@@ -41,7 +41,6 @@ Both container versions are based on the official Claude Code reference implemen
 The standard version provides a fully-featured development environment with:
 
 - **Developer Tools**: Git, fzf, jq, git-delta
-- **Python Support**: Python 3, pip, venv
 - **Network Security**: Basic firewall with configurable rules
 - **VS Code Integration**: Pre-configured extensions and settings
 - **Persistent Storage**: Command history and home directory
@@ -117,18 +116,18 @@ The hardened version adds multiple security layers:
 
 ```bash
 # Run comprehensive security audit
-./setup-devcontainer.sh audit
+./setup-hardened-devcontainer.sh audit
 
 # View security report inside container
-./setup-devcontainer.sh enter
+./setup-hardened-devcontainer.sh enter
 cat /tmp/security-report.txt
 
 # Monitor active connections
-./setup-devcontainer.sh enter
+./setup-hardened-devcontainer.sh enter
 monitor-connections
 
 # Check firewall status
-./setup-devcontainer.sh enter
+./setup-hardened-devcontainer.sh enter
 fw-status
 ```
 
@@ -170,23 +169,6 @@ readonly MAX_CPU="2"          # Maximum CPU cores
 readonly MAX_PIDS="512"       # Maximum process IDs
 ```
 
-## 🐍 Python Development
-
-Both versions include Python 3 with development tools:
-
-```bash
-# Create virtual environment
-python -m venv ~/.venvs/myproject
-source ~/.venvs/myproject/bin/activate
-
-# Install packages
-pip install requests pandas numpy
-
-# Security scanning (hardened version)
-security-scan  # Runs bandit and safety
-pip-audit      # Audit installed packages
-```
-
 ## 🔒 Security Features Comparison
 
 | Feature | Standard | Hardened |
@@ -222,7 +204,7 @@ podman ps -a
 ```bash
 # Some environments don't support NET_ADMIN
 # Run without strict firewall:
-ENABLE_STRICT_MODE=false ./setup-devcontainer.sh run
+ENABLE_STRICT_MODE=false ./setup-hardened-devcontainer.sh run
 ```
 
 ### Permission denied errors
@@ -254,14 +236,11 @@ The devcontainer.json is configured for VS Code with:
 - ESLint
 - Prettier
 - GitLens
-- Python (hardened version)
-- Pylance (hardened version)
 
 ### Settings
 
 - Format on save
 - ZSH as default terminal
-- Python linting enabled
 
 To use with VS Code:
 
@@ -291,13 +270,13 @@ git push
 
 ```bash
 # 1. Setup with security
-./setup-devcontainer.sh
+./setup-hardened-devcontainer.sh
 
 # 2. Run security audit
-./setup-devcontainer.sh audit
+./setup-hardened-devcontainer.sh audit
 
 # 3. Enter and verify security
-./setup-devcontainer.sh enter
+./setup-hardened-devcontainer.sh enter
 security-report
 
 # 4. Development with monitoring

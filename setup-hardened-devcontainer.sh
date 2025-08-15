@@ -293,9 +293,7 @@ create_devcontainer_structure() {
       "extensions": [
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",
-        "eamodio.gitlens",
-        "ms-python.python",
-        "ms-python.vscode-pylance"
+        "eamodio.gitlens"
       ],
       "settings": {
         "editor.formatOnSave": true,
@@ -312,10 +310,7 @@ create_devcontainer_structure() {
           "zsh": {
             "path": "zsh"
           }
-        },
-        "python.defaultInterpreterPath": "/usr/bin/python3",
-        "python.linting.enabled": true,
-        "python.linting.pylintEnabled": true
+        }
       }
     }
   },
@@ -356,11 +351,6 @@ RUN apt-get update && apt-get upgrade -y && \
     ca-certificates \
     gnupg \
     lsb-release \
-    python3 \
-    python3-pip \
-    python3-venv \
-    python3-dev \
-    build-essential \
     libseccomp2 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -379,9 +369,6 @@ RUN echo "umask 077" >> /etc/profile && \
     echo "ulimit -c 0" >> /etc/profile && \
     echo "readonly TMOUT=900" >> /etc/profile.d/timeout.sh && \
     chmod 644 /etc/profile.d/timeout.sh
-
-# Security: Remove unnecessary setuid/setgid binaries
-RUN find / -perm /6000 -type f -exec chmod a-s {} \; 2>/dev/null || true
 
 # Set up command history with restricted permissions
 RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" && \
@@ -427,26 +414,18 @@ USER $USERNAME
 ENV NPM_CONFIG_PREFIX=/home/$USERNAME/.npm-global
 ENV PATH=/home/$USERNAME/.npm-global/bin:$PATH
 
-# Configure Python with security settings
-RUN mkdir -p /home/$USERNAME/.local/bin && \
-    python3 -m pip install --user --upgrade pip setuptools wheel && \
-    python3 -m pip install --user pylint black mypy bandit safety
-
-# Set Python environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PIP_NO_CACHE_DIR=1
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
-ENV PATH="/home/$USERNAME/.local/bin:$PATH"
-
 # Install Oh My Zsh with security considerations
+USER root
 ARG ZSH_IN_DOCKER_VERSION=1.2.0
-RUN sh -c "$(wget -q -O- https://github.com/deluan/zsh-in-docker/releases/download/v${ZSH_IN_DOCKER_VERSION}/zsh-in-docker.sh)" -- \
+RUN export HOME=/home/$USERNAME && \
+    sh -c "$(wget -q -O- https://github.com/deluan/zsh-in-docker/releases/download/v${ZSH_IN_DOCKER_VERSION}/zsh-in-docker.sh)" -- \
     -t robbyrussell \
     -p git \
     -p npm \
-    -p node \
-    -p python \
-    -p pip
+    -p node && \
+    chown -R $USERNAME:$USERNAME /home/$USERNAME && \
+    usermod -s /usr/bin/zsh $USERNAME
+USER $USERNAME
 
 # Security: Configure shell history
 RUN echo "export HISTSIZE=10000" >> ~/.zshrc && \
@@ -458,9 +437,10 @@ RUN echo "export HISTSIZE=10000" >> ~/.zshrc && \
 # Set the default shell to zsh
 ENV SHELL=/usr/bin/zsh
 
-# Security: Final permission check
+# Security: Final permission check and remove setuid/setgid binaries
 USER root
-RUN find /home/$USERNAME -type f -name ".*" -exec chmod 600 {} \; 2>/dev/null || true && \
+RUN find / -perm /6000 -type f -exec chmod a-s {} \; 2>/dev/null || true && \
+    find /home/$USERNAME -type f -name ".*" -exec chmod 600 {} \; 2>/dev/null || true && \
     find /workspace -type f -exec chmod 644 {} \; 2>/dev/null || true && \
     find /workspace -type d -exec chmod 755 {} \; 2>/dev/null || true
 USER $USERNAME
@@ -705,9 +685,6 @@ set -euo pipefail
 
 echo "Running post-create setup..."
 
-# Install additional security tools
-pip install --user --upgrade bandit safety pip-audit
-
 # Create development directories
 mkdir -p ~/projects ~/scripts ~/configs
 chmod 700 ~/projects ~/scripts ~/configs
@@ -718,15 +695,9 @@ git config --global apply.whitespace fix
 git config --global url."https://github.com/".insteadOf git@github.com:
 git config --global url."https://".insteadOf git://
 
-# Set up Python virtual environment
-python3 -m venv ~/.venvs/default
-echo "source ~/.venvs/default/bin/activate" >> ~/.zshrc
-
-# Create aliases for security tools
+# Create aliases for tools
 cat >> ~/.zshrc << 'ALIASES_EOF'
 # Security aliases
-alias security-scan='bandit -r . && safety check'
-alias pip-audit='python -m pip_audit'
 alias check-secrets='git secrets --scan'
 alias fw-status='sudo iptables -L -n -v'
 alias monitor-connections='watch -n 5 "ss -tunp | grep -v 127.0.0.1"'
@@ -734,8 +705,6 @@ alias security-report='cat /tmp/security-report.txt'
 
 # Development aliases
 alias ll='ls -la'
-alias py='python3'
-alias venv='source ~/.venvs/default/bin/activate'
 ALIASES_EOF
 
 echo "Post-create setup complete!"
@@ -827,8 +796,8 @@ run_container() {
     )
 
     # Add seccomp profile if enabled
-    if [[ "$ENABLE_SECCOMP" == "true" ]] && [[ -f "${DEVCONTAINER_DIR}/security/seccomp.json" ]]; then
-        SECURITY_OPTS+=("--security-opt=seccomp=${DEVCONTAINER_DIR}/security/seccomp.json")
+    if [[ "$ENABLE_SECCOMP" == "true" ]] && [[ -f "${WORKSPACE_DIR}/${DEVCONTAINER_DIR}/security/seccomp.json" ]]; then
+        SECURITY_OPTS+=("--security-opt=seccomp=${WORKSPACE_DIR}/${DEVCONTAINER_DIR}/security/seccomp.json")
     fi
 
     # Add AppArmor profile if available and enabled

@@ -47,7 +47,7 @@ create_devcontainer_structure() {
   "build": {
     "dockerfile": "Dockerfile",
     "args": {
-      "TZ": "${localEnv:TZ:America/Los_Angeles}",
+      "TZ": "${localEnv:TZ:UTC}",
       "CLAUDE_CODE_VERSION": "latest",
       "GIT_DELTA_VERSION": "0.18.2",
       "ZSH_IN_DOCKER_VERSION": "1.2.0"
@@ -111,6 +111,7 @@ RUN apt-get update && apt-get install -y \
     zsh \
     fzf \
     jq \
+    watch \
     iptables \
     ipset \
     net-tools \
@@ -118,11 +119,6 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     gnupg \
     lsb-release \
-    python3 \
-    python3-pip \
-    python3-venv \
-    python3-dev \
-    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up non-root user with sudo
@@ -159,19 +155,6 @@ USER node
 # Install global npm packages directory
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
 ENV PATH=$PATH:/usr/local/share/npm-global/bin
-
-# Configure Python
-RUN sudo ln -s /usr/bin/python3 /usr/bin/python && \
-    sudo ln -s /usr/bin/pip3 /usr/bin/pip
-
-# Create Python virtual environment directory
-RUN mkdir -p /home/node/.venvs && \
-    chown -R node:node /home/node/.venvs
-
-# Set Python environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PIP_NO_CACHE_DIR=1
-ENV PATH="/home/node/.local/bin:$PATH"
 
 # Install Oh My Zsh
 ARG ZSH_IN_DOCKER_VERSION=1.2.0
@@ -259,8 +242,6 @@ if command -v ipset &> /dev/null; then
         "raw.githubusercontent.com"
         "registry.npmjs.org"
         "api.anthropic.com"
-        "pypi.org"
-        "files.pythonhosted.org"
     )
 
     for domain in "${domains[@]}"; do
@@ -315,7 +296,7 @@ build_container() {
     # Build with podman
     podman build \
         --tag "${IMAGE_NAME}:latest" \
-        --build-arg TZ="${TZ:-America/Los_Angeles}" \
+        --build-arg TZ="${TZ:-UTC}" \
         --build-arg CLAUDE_CODE_VERSION="latest" \
         --build-arg GIT_DELTA_VERSION="0.18.2" \
         --build-arg ZSH_IN_DOCKER_VERSION="1.2.0" \
