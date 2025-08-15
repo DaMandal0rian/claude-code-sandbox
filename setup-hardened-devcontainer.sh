@@ -265,7 +265,7 @@ create_devcontainer_structure() {
   "build": {
     "dockerfile": "Dockerfile",
     "args": {
-      "TZ": "${localEnv:TZ:America/Los_Angeles}",
+      "TZ": "${localEnv:TZ:UTC}",        // use your TZ, falls back if unset
       "CLAUDE_CODE_VERSION": "latest",
       "GIT_DELTA_VERSION": "0.18.2",
       "ZSH_IN_DOCKER_VERSION": "1.2.0"
@@ -273,8 +273,7 @@ create_devcontainer_structure() {
   },
   "runArgs": [
     "--cap-drop=ALL",
-    "--cap-add=NET_ADMIN",
-    "--cap-add=NET_RAW",
+    "--cap-add=NET_RAW",           // needed for ping; drop if not required
     "--cap-add=CHOWN",
     "--cap-add=DAC_OVERRIDE",
     "--cap-add=FOWNER",
@@ -284,11 +283,11 @@ create_devcontainer_structure() {
     "--cap-add=SETUID",
     "--cap-add=SETPCAP",
     "--cap-add=SYS_CHROOT",
-    "--security-opt=no-new-privileges:true",
+    "--security-opt","no-new-privileges:true",
     "--read-only",
     "--tmpfs=/tmp:rw,noexec,nosuid,size=2g",
-    "--tmpfs=/var/tmp:rw,noexec,nosuid,size=1g",
-    "--tmpfs=/home/node/.cache:rw,noexec,nosuid,size=1g"
+    "--tmpfs=/var/tmp:rw,noexec,nosuid,size=1g"
+    // removed: tmpfs on /home/node/.cache to avoid mount-on-mount collisions
   ],
   "customizations": {
     "vscode": {
@@ -300,18 +299,11 @@ create_devcontainer_structure() {
       "settings": {
         "editor.formatOnSave": true,
         "editor.defaultFormatter": "esbenp.prettier-vscode",
-        "editor.codeActionsOnSave": {
-          "source.fixAll.eslint": "explicit"
-        },
+        "editor.codeActionsOnSave": { "source.fixAll.eslint": "explicit" },
         "terminal.integrated.defaultProfile.linux": "zsh",
         "terminal.integrated.profiles.linux": {
-          "bash": {
-            "path": "bash",
-            "icon": "terminal-bash"
-          },
-          "zsh": {
-            "path": "zsh"
-          }
+          "bash": { "path": "bash", "icon": "terminal-bash" },
+          "zsh":  { "path": "zsh" }
         }
       }
     }
@@ -319,7 +311,12 @@ create_devcontainer_structure() {
   "features": {
     "ghcr.io/devcontainers/features/node:1": {}
   },
-  "postStartCommand": "/bin/bash .devcontainer/init-security.sh",
+  "containerEnv": {
+    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",  // set on host: export ANTHROPIC_API_KEY=sk-ant-...
+    "CLAUDE_TELEMETRY_OPTOUT": "1",
+    "XDG_CONFIG_HOME": "/home/node/.config",
+    "XDG_CACHE_HOME": "/tmp/xdg-cache"
+  },
   "remoteUser": "node",
   "workspaceFolder": "/workspace",
   "mounts": [
@@ -327,7 +324,8 @@ create_devcontainer_structure() {
     "source=commandhistory,target=/commandhistory,type=volume",
     "source=home-node,target=/home/node,type=volume"
   ],
-  "postCreateCommand": "claude --version && /bin/bash .devcontainer/post-create.sh"
+  "postCreateCommand": "claude --version && /bin/bash .devcontainer/post-create.sh",
+  "postStartCommand": "/bin/bash .devcontainer/init-security.sh"
 }
 EOF
 
@@ -432,7 +430,7 @@ RUN export HOME=/home/$USERNAME && \
 USER $USERNAME
 
 # Install Claude Code CLI via npm
-RUN npm install -g @anthropic-ai/claude
+RUN npm install -g @anthropic-ai/claude-code
 
 # Shell history hardening (keep aliases separate)
 RUN echo "export HISTSIZE=10000" >> ~/.zshrc && \
