@@ -179,7 +179,7 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
 ENV SHELL=/bin/zsh
 
 # Install Claude Code CLI via npm
-RUN mkdir -p /home/node/.npm-global && npm install -g @anthropic-ai/claude-code
+RUN npm install -g @anthropic-ai/claude-code
 
 CMD ["/bin/zsh"]
 EOF
@@ -414,11 +414,9 @@ run_container() {
         --cap-add=NET_RAW \
         --env "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
         --env "CLAUDE_TELEMETRY_OPTOUT=1" \
-        --env "XDG_CONFIG_HOME=/home/node/.config" \
-        --env "XDG_CACHE_HOME=/home/node/.cache" \
         --volume "${WORKSPACE_DIR}:/workspace:Z" \
         --volume "commandhistory:/commandhistory" \
-        --volume "home-node:/home/node" \
+        --volume "home-node:/home/node:Z" \
         --workdir /workspace \
         --user node \
         "${IMAGE_NAME}:latest" \

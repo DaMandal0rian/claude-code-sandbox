@@ -435,7 +435,7 @@ RUN export HOME=/home/$USERNAME && \
 USER $USERNAME
 
 # Install Claude Code CLI via npm
-RUN mkdir -p /home/$USERNAME/.npm-global && npm install -g @anthropic-ai/claude-code
+RUN npm install -g @anthropic-ai/claude-code
 
 # Shell history hardening
 RUN echo "export HISTSIZE=10000" >> ~/.zshrc && \
@@ -1077,17 +1077,15 @@ run_container() {
         --name "${CONTAINER_NAME}" \
         --hostname "${CONTAINER_NAME}" \
         "${SECURITY_OPTS[@]}" \
-        --env "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
-        --env "CLAUDE_TELEMETRY_OPTOUT=1" \
-        --env "NODE_ENV=development" \
-        --env "PYTHONDONTWRITEBYTECODE=1" \
-        --env "XDG_CONFIG_HOME=/home/node/.config" \
-        --env "XDG_CACHE_HOME=/tmp/xdg-cache" \
         --volume "${WORKSPACE_DIR}:/workspace:Z" \
         --volume "commandhistory:/commandhistory:Z" \
         --volume "home-node:/home/node:Z" \
         --workdir /workspace \
         --user node \
+        --env NODE_ENV=development \
+        --env PYTHONDONTWRITEBYTECODE=1 \
+        --env "XDG_CONFIG_HOME=/home/node/.config" \
+        --env "XDG_CACHE_HOME=/tmp/xdg-cache" \
         --ulimit nofile=1024:1024 \
         --ulimit nproc=512:512 \
         "${IMAGE_NAME}:latest" \
