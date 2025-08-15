@@ -430,7 +430,7 @@ RUN export HOME=/home/$USERNAME && \
 USER $USERNAME
 
 # Install Claude Code CLI via npm
-RUN npm install -g @anthropic-ai/claude
+RUN npm install -g @anthropic-ai/claude-code
 
 # Shell history hardening (keep aliases separate)
 RUN echo "export HISTSIZE=10000" >> ~/.zshrc && \

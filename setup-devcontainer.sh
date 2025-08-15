@@ -170,7 +170,7 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
 ENV SHELL=/bin/zsh
 
 # Install Claude Code CLI via npm
-RUN mkdir -p /home/node/.npm-global && npm install -g @anthropic-ai/claude
+RUN mkdir -p /home/node/.npm-global && npm install -g @anthropic-ai/claude-code
 
 CMD ["/bin/zsh"]
 EOF
