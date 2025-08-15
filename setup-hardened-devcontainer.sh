@@ -354,7 +354,6 @@ RUN apt-get update && apt-get upgrade -y && \
     libseccomp2 \
     procps \
     iproute2 \
-    dig \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
@@ -417,49 +416,56 @@ USER $USERNAME
 ENV NPM_CONFIG_PREFIX=/home/$USERNAME/.npm-global
 ENV PATH=/home/$USERNAME/.npm-global/bin:$PATH
 
-# Install Oh My Zsh with security considerations
+# Install Oh My Zsh as root (avoid 'sudo' during build)
 USER root
 ARG ZSH_IN_DOCKER_VERSION=1.2.0
 RUN export HOME=/home/$USERNAME && \
-    sh -c "$(wget -q -O- https://github.com/deluan/zsh-in-docker/releases/download/v${ZSH_IN_DOCKER_VERSION}/zsh-in-docker.sh)" -- \
-    -t robbyrussell \
-    -p git \
-    -p npm \
-    -p node && \
+    wget -q -O /usr/local/bin/zid.sh "https://github.com/deluan/zsh-in-docker/releases/download/v${ZSH_IN_DOCKER_VERSION}/zsh-in-docker.sh" && \
+    chmod +x /usr/local/bin/zid.sh && \
+    HOME=/home/$USERNAME /usr/local/bin/zid.sh -t robbyrussell -p git -p npm -p node && \
     chown -R $USERNAME:$USERNAME /home/$USERNAME && \
     usermod -s /usr/bin/zsh $USERNAME
+
+# Switch to user
 USER $USERNAME
 
-# Security: Configure shell history
+# Shell history hardening (keep aliases separate)
 RUN echo "export HISTSIZE=10000" >> ~/.zshrc && \
     echo "export SAVEHIST=10000" >> ~/.zshrc && \
     echo "export HISTTIMEFORMAT='%F %T '" >> ~/.zshrc && \
     echo "setopt HIST_IGNORE_SPACE" >> ~/.zshrc && \
-    echo "setopt HIST_EXPIRE_DUPS_FIRST" >> ~/.zshrc && \
-    echo "" >> ~/.zshrc && \
-    echo "# Security aliases" >> ~/.zshrc && \
-    echo "alias check-secrets='git secrets --scan 2>/dev/null || echo \"git-secrets not installed\"'" >> ~/.zshrc && \
-    echo "alias fw-status='sudo iptables -L -n -v'" >> ~/.zshrc && \
-    echo "alias monitor-connections='while true; do clear; echo \"=== Active Network Connections ===\"; ss -tunp 2>/dev/null | grep -v \"127.0.0.1\" || ss -tun | grep -v \"127.0.0.1\"; echo -e \"\\nPress Ctrl+C to stop\"; sleep 5; done'" >> ~/.zshrc && \
-    echo "alias security-report='cat /tmp/security-report.txt 2>/dev/null || echo \"No security report found\"'" >> ~/.zshrc && \
-    echo "alias check-processes='ps aux --forest'" >> ~/.zshrc && \
-    echo "alias check-ports='sudo ss -tlnp'" >> ~/.zshrc && \
-    echo "alias check-firewall='sudo iptables -L -n -v'" >> ~/.zshrc && \
-    echo "alias monitor-logs='tail -f /tmp/security.log 2>/dev/null || echo \"No security log found\"'" >> ~/.zshrc && \
-    echo "alias ll='ls -la'" >> ~/.zshrc
+    echo "setopt HIST_EXPIRE_DUPS_FIRST" >> ~/.zshrc
 
-# Set the default shell to zsh
+# === Alias persistence: separate file + source from both .zshrc and .zshenv ===
+RUN cat > /home/node/.zsh_aliases <<'ALIASES'
+alias check-secrets='git secrets --scan 2>/dev/null || echo "git-secrets not installed"'
+alias fw-status='sudo iptables -L -n -v'
+alias monitor-connections='while true; do clear; echo "=== Active Network Connections ==="; ss -tunp 2>/dev/null | grep -v "127.0.0.1" || ss -tun | grep -v "127.0.0.1"; echo -e "\nPress Ctrl+C to stop"; sleep 5; done'
+alias security-report='cat /tmp/security-report.txt 2>/dev/null || echo "No security report found"'
+alias check-processes='ps aux --forest'
+alias check-ports='sudo ss -tlnp'
+alias check-firewall='sudo iptables -L -n -v'
+alias monitor-logs='tail -f /tmp/security.log 2>/dev/null || echo "No security log found"'
+alias ll='ls -la'
+ALIASES
+
+RUN echo 'if [ -f ~/.zsh_aliases ]; then source ~/.zsh_aliases; fi' >> /home/node/.zshrc && \
+    echo 'if [ -f ~/.zsh_aliases ]; then source ~/.zsh_aliases; fi' >> /home/node/.zshenv && \
+    chown node:node /home/node/.zsh_aliases && chmod 644 /home/node/.zsh_aliases
+
+# Ensure PATH for npm-global survives login/non-login shells
+RUN echo 'typeset -U path PATH; path=(/home/node/.npm-global/bin $path); export PATH=${path:+"${(j/:/)path}"}' >> /home/node/.zshenv
+
+# Make zsh the default shell for processes
 ENV SHELL=/usr/bin/zsh
 
-# Security: Final permission check and remove setuid/setgid binaries
+# --- Save a skeleton of /home/node for seeding mounted volume on first run ---
 USER root
-RUN find / -perm /6000 -type f -exec chmod a-s {} \; 2>/dev/null || true && \
-    find /home/$USERNAME -type f -name ".*" -exec chmod 600 {} \; 2>/dev/null || true && \
-    find /workspace -type f -exec chmod 644 {} \; 2>/dev/null || true && \
-    find /workspace -type d -exec chmod 755 {} \; 2>/dev/null || true
+RUN mkdir -p /opt/container-skel/home && \
+    cp -a /home/$USERNAME/. /opt/container-skel/home/
 USER $USERNAME
 
-CMD ["/usr/bin/zsh"]
+CMD ["/usr/bin/zsh", "-l"]
 EOF
 
     # Create enhanced security initialization script
@@ -782,6 +788,13 @@ run_container() {
     podman volume create commandhistory 2>/dev/null || true
     podman volume create home-node 2>/dev/null || true
 
+    # Seed the /home/node volume with defaults (aliases, .zshrc, OMZ) if empty
+    print_message $YELLOW "Seeding home volume (non-destructive)..."
+    podman run --rm --user root \
+        -v "home-node:/home/node:Z" \
+        "${IMAGE_NAME}:latest" \
+        bash -lc 'cp -an /opt/container-skel/home/. /home/node/ && chown -R node:node /home/node || true'
+
     # Prepare security options
     SECURITY_OPTS=(
         # Drop all capabilities first
@@ -878,7 +891,7 @@ run_container() {
 enter_container() {
     print_message $YELLOW "Entering hardened container..."
     print_message $YELLOW "Note: Running with restricted privileges and monitored environment"
-    podman exec -it "${CONTAINER_NAME}" /usr/bin/zsh
+    podman exec -it "${CONTAINER_NAME}" /usr/bin/zsh -l
 }
 
 # Function to stop the container
