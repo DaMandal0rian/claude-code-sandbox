@@ -142,26 +142,6 @@ The following extensions are automatically installed in the container:
 claude "help me create a REST API"
 ```
 
-### Installing Dependencies
-
-```bash
-# Node.js packages
-npm install express
-
-# Python packages
-pip install --user flask
-```
-
-### Running Development Servers
-
-```bash
-# Start a Node.js server
-npm run dev
-
-# VS Code will detect and forward the port
-# Click the notification to open in browser
-```
-
 ### Debugging
 
 1. Set breakpoints in your code

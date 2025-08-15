@@ -76,11 +76,11 @@ For production environments, consider using:
 ```bash
 # Using a secrets file (not in git)
 source ~/.claude-secrets
-./setup-devcontainer.sh run
+./setup-hardened-devcontainer.sh run
 
 # Using a password manager
 export ANTHROPIC_API_KEY=$(pass show anthropic/api-key)
-./setup-devcontainer.sh run
+./setup-hardended-devcontainer.sh run
 ```
 
 ## 📋 Prerequisites
@@ -442,7 +442,7 @@ npm update -g @anthropic-ai/claude-code
 
 ```bash
 # Pull latest base image and rebuild
-podman pull node:20-bookworm
+podman pull node:20-bookworm-slim
 ./setup-devcontainer.sh rebuild
 ```
 
