@@ -23,6 +23,8 @@ DEVCONTAINER_DIR=".devcontainer"
 ENABLE_STRICT_MODE="${ENABLE_STRICT_MODE:-true}"
 ENABLE_SECCOMP="${ENABLE_SECCOMP:-true}"
 ENABLE_APPARMOR="${ENABLE_APPARMOR:-false}"  # Disabled by default, enable if available
+ENABLE_NNP="${ENABLE_NNP:-true}"   # controls --security-opt=no-new-privileges
+
 
 # Security settings
 readonly MAX_MEMORY="4g"
@@ -330,8 +332,9 @@ create_devcontainer_structure() {
 }
 EOF
 
-    # Create hardened Dockerfile
-    cat > "${DEVCONTAINER_DIR}/Dockerfile" << 'EOF'
+# Create hardened Dockerfile
+cat > "${DEVCONTAINER_DIR}/Dockerfile" << 'EOF'
+
 FROM node:20-bookworm-slim
 
 # Security: Run package updates first
@@ -443,7 +446,7 @@ alias fw-status='sudo iptables -L -n -v'
 alias monitor-connections='while true; do clear; echo "=== Active Network Connections ==="; ss -tunp 2>/dev/null | grep -v "127.0.0.1" || ss -tun | grep -v "127.0.0.1"; echo -e "\nPress Ctrl+C to stop"; sleep 5; done'
 alias security-report='cat /tmp/security-report.txt 2>/dev/null || echo "No security report found"'
 alias check-processes='ps aux --forest'
-alias check-ports='sudo ss -tlnp'
+alias check-ports='ss -tlnp 2>/dev/null || ss -tln'
 alias check-firewall='sudo iptables -L -n -v'
 alias monitor-logs='tail -f /tmp/security.log 2>/dev/null || echo "No security log found"'
 alias ll='ls -la'
@@ -835,6 +838,11 @@ run_container() {
         --tmpfs=/home/node/.local:rw,noexec,nosuid,size=512m
     )
 
+    # Conditionally enable NNP
+    if [[ "${ENABLE_NNP}" == "true" ]]; then
+    SECURITY_OPTS+=( --security-opt=no-new-privileges )
+    fi
+
     # Add seccomp profile if enabled
     if [[ "$ENABLE_SECCOMP" == "true" ]] && [[ -f "${WORKSPACE_DIR}/${DEVCONTAINER_DIR}/security/seccomp.json" ]]; then
         SECURITY_OPTS+=("--security-opt=seccomp=${WORKSPACE_DIR}/${DEVCONTAINER_DIR}/security/seccomp.json")
@@ -982,6 +990,7 @@ Options:
     -s          Enable strict mode (default: true)
     -S          Enable seccomp filtering (default: true)
     -a          Enable AppArmor if available (default: false)
+    -N          Disable no-new-privileges (lets sudo elevate)
     -h          Show this help message
 
 Security Features:
@@ -994,6 +1003,7 @@ Security Features:
     - No new privileges flag
     - Seccomp filtering (optional)
     - AppArmor support (optional)
+    - No new privileges flag (optional)
 
 Examples:
     $0              # Full setup with security hardening
@@ -1016,17 +1026,19 @@ EOF
 COMMAND="${1:-setup}"
 shift || true
 
-while getopts "n:i:w:sSah" opt; do
-    case $opt in
-        n) CONTAINER_NAME="$OPTARG" ;;
-        i) IMAGE_NAME="$OPTARG" ;;
-        w) WORKSPACE_DIR="$OPTARG" ;;
-        s) ENABLE_STRICT_MODE="true" ;;
-        S) ENABLE_SECCOMP="true" ;;
-        a) ENABLE_APPARMOR="true" ;;
-        h) usage; exit 0 ;;
-        \?) echo "Invalid option: -$OPTARG" >&2; usage; exit 1 ;;
-    esac
+# was: while getopts "n:i:w:sSah" opt; do
+while getopts "n:i:w:sSahN" opt; do
+  case $opt in
+    n) CONTAINER_NAME="$OPTARG" ;;
+    i) IMAGE_NAME="$OPTARG" ;;
+    w) WORKSPACE_DIR="$OPTARG" ;;
+    s) ENABLE_STRICT_MODE="true" ;;
+    S) ENABLE_SECCOMP="true" ;;
+    a) ENABLE_APPARMOR="true" ;;
+    N) ENABLE_NNP="false" ;;              # <-- new
+    h) usage; exit 0 ;;
+    \?) echo "Invalid option: -$OPTARG" >&2; usage; exit 1 ;;
+  esac
 done
 
 # Main execution
