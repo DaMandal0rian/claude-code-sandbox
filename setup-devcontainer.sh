@@ -239,11 +239,31 @@ if command -v ipset &> /dev/null; then
 
     # Add common development domains
     domains=(
+        # Package registries
+        "registry.npmjs.org"
+        "registry.yarnpkg.com"
+
+        # Version control
         "github.com"
         "api.github.com"
         "raw.githubusercontent.com"
-        "registry.npmjs.org"
+        "gitlab.com"
+        "bitbucket.org"
+
+        # Claude/Anthropic
         "api.anthropic.com"
+        "claude.ai"
+
+        # Container registries
+        "ghcr.io"
+        "docker.io"
+        "registry-1.docker.io"
+
+        # Development tools
+        "deb.debian.org"
+        "security.debian.org"
+        "archive.ubuntu.com"
+        "security.ubuntu.com"
     )
 
     for domain in "${domains[@]}"; do

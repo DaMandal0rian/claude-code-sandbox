@@ -540,8 +540,6 @@ ALLOWED_DOMAINS=(
     # Package registries
     "registry.npmjs.org"
     "registry.yarnpkg.com"
-    "pypi.org"
-    "files.pythonhosted.org"
 
     # Version control
     "github.com"
