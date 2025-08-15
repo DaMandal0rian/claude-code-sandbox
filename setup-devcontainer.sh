@@ -111,7 +111,6 @@ RUN apt-get update && apt-get install -y \
     zsh \
     fzf \
     jq \
-    watch \
     iptables \
     ipset \
     net-tools \

@@ -352,6 +352,9 @@ RUN apt-get update && apt-get upgrade -y && \
     gnupg \
     lsb-release \
     libseccomp2 \
+    procps \
+    iproute2 \
+    dig \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
@@ -432,7 +435,18 @@ RUN echo "export HISTSIZE=10000" >> ~/.zshrc && \
     echo "export SAVEHIST=10000" >> ~/.zshrc && \
     echo "export HISTTIMEFORMAT='%F %T '" >> ~/.zshrc && \
     echo "setopt HIST_IGNORE_SPACE" >> ~/.zshrc && \
-    echo "setopt HIST_EXPIRE_DUPS_FIRST" >> ~/.zshrc
+    echo "setopt HIST_EXPIRE_DUPS_FIRST" >> ~/.zshrc && \
+    echo "" >> ~/.zshrc && \
+    echo "# Security aliases" >> ~/.zshrc && \
+    echo "alias check-secrets='git secrets --scan 2>/dev/null || echo \"git-secrets not installed\"'" >> ~/.zshrc && \
+    echo "alias fw-status='sudo iptables -L -n -v'" >> ~/.zshrc && \
+    echo "alias monitor-connections='while true; do clear; echo \"=== Active Network Connections ===\"; ss -tunp 2>/dev/null | grep -v \"127.0.0.1\" || ss -tun | grep -v \"127.0.0.1\"; echo -e \"\\nPress Ctrl+C to stop\"; sleep 5; done'" >> ~/.zshrc && \
+    echo "alias security-report='cat /tmp/security-report.txt 2>/dev/null || echo \"No security report found\"'" >> ~/.zshrc && \
+    echo "alias check-processes='ps aux --forest'" >> ~/.zshrc && \
+    echo "alias check-ports='sudo ss -tlnp'" >> ~/.zshrc && \
+    echo "alias check-firewall='sudo iptables -L -n -v'" >> ~/.zshrc && \
+    echo "alias monitor-logs='tail -f /tmp/security.log 2>/dev/null || echo \"No security log found\"'" >> ~/.zshrc && \
+    echo "alias ll='ls -la'" >> ~/.zshrc
 
 # Set the default shell to zsh
 ENV SHELL=/usr/bin/zsh
@@ -617,8 +631,15 @@ while true; do
     # Check for suspicious processes
     suspicious=$(ps aux | grep -E "(nc|netcat|nmap|tcpdump|wireshark)" | grep -v grep || true)
     if [ -n "$suspicious" ]; then
-        echo "[ALERT] Suspicious process detected: $suspicious" >> /tmp/security.log
+        echo "[ALERT] $(date '+%Y-%m-%d %H:%M:%S') Suspicious process detected: $suspicious" >> /tmp/security.log
     fi
+
+    # Monitor high CPU/memory usage
+    high_usage=$(ps aux | awk '$3 > 80.0 || $4 > 80.0 {print}' | grep -v "COMMAND" || true)
+    if [ -n "$high_usage" ]; then
+        echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') High resource usage detected: $high_usage" >> /tmp/security.log
+    fi
+
     sleep 60
 done
 MONITOR_EOF
@@ -633,9 +654,19 @@ log_security "Setting up network monitoring..."
 cat > /tmp/monitor-network.sh << 'NET_EOF'
 #!/bin/bash
 # Network connection monitor
+LOG_FILE="/tmp/network-connections.log"
 while true; do
-    # Log new connections
-    ss -tunp 2>/dev/null | grep -v "127.0.0.1" | tail -n +2 >> /tmp/network-connections.log
+    # Log new connections with timestamp
+    echo "=== $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
+    ss -tunp 2>/dev/null | grep -v "127.0.0.1" | tail -n +2 >> "$LOG_FILE" || \
+        ss -tun | grep -v "127.0.0.1" | tail -n +2 >> "$LOG_FILE"
+
+    # Check for suspicious ports
+    suspicious_ports=$(ss -tun | grep -E ":(4444|5555|6666|7777|8888|9999)" | grep -v "127.0.0.1" || true)
+    if [ -n "$suspicious_ports" ]; then
+        echo "[ALERT] $(date '+%Y-%m-%d %H:%M:%S') Suspicious port activity: $suspicious_ports" >> /tmp/security.log
+    fi
+
     sleep 30
 done
 NET_EOF
@@ -695,19 +726,15 @@ git config --global apply.whitespace fix
 git config --global url."https://github.com/".insteadOf git@github.com:
 git config --global url."https://".insteadOf git://
 
-# Create aliases for tools
-cat >> ~/.zshrc << 'ALIASES_EOF'
-# Security aliases
-alias check-secrets='git secrets --scan'
-alias fw-status='sudo iptables -L -n -v'
-alias monitor-connections='watch -n 5 "ss -tunp | grep -v 127.0.0.1"'
-alias security-report='cat /tmp/security-report.txt'
-
-# Development aliases
-alias ll='ls -la'
-ALIASES_EOF
-
 echo "Post-create setup complete!"
+echo ""
+echo "Security commands available:"
+echo "  check-processes    - View running processes"
+echo "  check-ports        - View listening ports"
+echo "  monitor-connections - Monitor network connections"
+echo "  check-firewall     - View firewall rules"
+echo "  security-report    - View security configuration"
+echo "  monitor-logs       - View security logs"
 EOF
 
     chmod +x "${DEVCONTAINER_DIR}/init-security.sh"
